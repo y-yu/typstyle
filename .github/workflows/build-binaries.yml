@@ -127,15 +127,21 @@ jobs:
           path: typstyle-${{ matrix.rust-target }}${{ fromJSON('["", ".exe"]')[matrix.platform == 'win32'] }}
 
   build_alpine:
-    name: build (x86_64-unknown-linux-musl)
+    strategy:
+      matrix:
+        include:
+        - os: ubuntu-latest
+          rust-target: x86_64-unknown-linux-musl
+          cross: false
+        - os: ubuntu-latest
+          rust-target: aarch64-unknown-linux-musl
+          cross: true
+    name: build (${{ matrix.rust-target }})
     runs-on: ubuntu-latest
     container:
       image: rust:alpine
       volumes:
         - /usr/local/cargo/registry:/usr/local/cargo/registry
-    env:
-      RUST_TARGET: x86_64-unknown-linux-musl
-      RUSTFLAGS: "-C target-feature=+crt-static"
     steps:
       - name: Install dependencies
         run: apk add --no-cache git clang lld musl-dev nodejs npm yarn binutils
@@ -146,23 +152,29 @@ jobs:
       - name: Run rust cache
         uses: Swatinem/rust-cache@v2
       - name: Build typstyle binary
+        if: ${{ !matrix.cross }}
         run: |
-          cargo build --profile=ci --target $RUST_TARGET
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --profile=ci --target ${{ matrix.rust-target }}
+      - name: Cross build typstyle binary
+        if: ${{ matrix.cross }}
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross.git --locked --rev 085092ca
+          RUSTFLAGS="-C target-feature=-crt-static" cross build --profile=ci --target ${{ matrix.rust-target }}
       - name: Split debug symbols
         run: |
           cd target/$RUST_TARGET/ci
-          objcopy --compress-debug-sections --only-keep-debug "typstyle" "typstyle-${{ env.RUST_TARGET }}.debug"
-          objcopy --strip-debug --add-gnu-debuglink="typstyle-${{ env.RUST_TARGET }}.debug" "typstyle"
+          objcopy --compress-debug-sections --only-keep-debug "typstyle" "typstyle-${{ matrix.rust-target }}.debug"
+          objcopy --strip-debug --add-gnu-debuglink="typstyle-${{ matrix.rust-target }}.debug" "typstyle"
       - name: Upload split debug symbols
         uses: actions/upload-artifact@v4
         with:
-          name: typstyle-${{ env.RUST_TARGET }}.debug
-          path: target/${{ env.RUST_TARGET }}/ci/typstyle-${{ env.RUST_TARGET }}.debug
+          name: typstyle-${{ matrix.rust-target }}.debug
+          path: target/${{ matrix.rust-target }}/ci/typstyle-${{ matrix.rust-target }}.debug
       - name: Copy binary to output directory
         run: |
-          cp "target/${{ env.RUST_TARGET }}/ci/typstyle" "typstyle-${{ env.RUST_TARGET }}"
+          cp "target/${{ matrix.rust-target }}/ci/typstyle" "typstyle-${{ matrix.rust-target }}"
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: typstyle-${{ env.RUST_TARGET }}
-          path: typstyle-${{ env.RUST_TARGET }}
+          name: typstyle-${{ matrix.rust-target }}
+          path: typstyle-${{ matrix.rust-target }}
